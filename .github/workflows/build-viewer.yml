@@ -2,6 +2,7 @@
 # (2026-11-19 사용자 요청: 공개 레포의 무료 윈도 실행기로 빌드). 이 파일이 원본 — 바꾸면 공개 레포에도 같게 올린다.
 #
 # 지키는 것(측정 장비 코드는 아직 공개하지 않는다 — 특허 재검토 중):
+# - 접근 파일(rigdrive.enc — 비밀번호로 잠김)은 비밀 값 VIEWER_ENC_B64 로만 받아 실행 파일 안에 넣고 지운다(2026-11-19 사용자: 실행 파일 하나 · 비밀번호만).
 # - 코드는 공개 레포에 커밋하지 않는다. 실행기가 비공개 레포를 토큰(VIEWER_BUILD_TOKEN — 비공개 레포 Contents 읽기 · 쓰기만)으로 받는다.
 # - 만든 파일은 공개 레포 artifact 로 남기지 않고 비공개 레포 릴리즈에 바로 올린다(공개 레포의 artifact · 로그는 누구나 본다).
 # - 빌드 출력(모듈 이름 · 경로)은 로그에 찍지 않는다 — 실패할 때만 끝부분.
@@ -44,27 +45,34 @@ jobs:
           Expand-Archive $z -DestinationPath rc
           $exe = (Get-ChildItem rc -Recurse -Filter rclone.exe | Select-Object -First 1).FullName
           "RCLONE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: 만들기
+      - name: 만들기 (실행 파일 하나 · 창 없음)
         shell: pwsh
+        env:
+          ENC_B64: ${{ secrets.VIEWER_ENC_B64 }}
         run: |
           $log = Join-Path $env:RUNNER_TEMP "build.log"
+          $enc = Join-Path $env:RUNNER_TEMP "rigdrive.enc"
+          if ($env:ENC_B64) { [IO.File]::WriteAllBytes($enc, [Convert]::FromBase64String($env:ENC_B64)); $env:RIG_VIEWER_ENC = $enc }
           & pwsh -NoProfile -ExecutionPolicy Bypass -File src\tools\viewer\packaging\build_win.ps1 -Rclone $env:RCLONE_EXE *> $log
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path src\tools\viewer\dist\RigViewer\RigViewer.exe)) { Get-Content $log -Tail 40; exit 1 }
-          Write-Host "만들었습니다"
+          $code = $LASTEXITCODE
+          Remove-Item $enc -ErrorAction SilentlyContinue
+          if ($code -ne 0 -or -not (Test-Path src\tools\viewer\dist\RigViewer.exe)) { Get-Content $log -Tail 40; exit 1 }
+          Write-Host ("만들었습니다 — 접근 파일 " + ($(if ($env:ENC_B64) { "포함" } else { "없음" })))
       - name: 실행 확인 (잠금 화면)
         shell: pwsh
         run: |
-          $p = Start-Process src\tools\viewer\dist\RigViewer\RigViewer.exe -ArgumentList "run","--no-browser","--port","18765" -PassThru
+          $p = Start-Process src\tools\viewer\dist\RigViewer.exe -ArgumentList "run","--no-browser","--port","18765" -PassThru
           $ok = $false
-          for ($i = 0; $i -lt 60; $i++) { try { $r = Invoke-WebRequest http://127.0.0.1:18765/login -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -match "측정 결과 열람") { $ok = $true; break } } catch {} ; Start-Sleep 1 }
+          for ($i = 0; $i -lt 90; $i++) { try { $r = Invoke-WebRequest http://127.0.0.1:18765/login -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -match "측정 결과 열람" -and $r.Content -notmatch "접근 파일\(rigdrive.enc\)이 없습니다") { $ok = $true; break } } catch {} ; Start-Sleep 1 }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { Write-Host "열람 도구가 화면을 열지 못했습니다"; exit 1 }
-          Write-Host "잠금 화면 응답 확인"
+          Get-Process RigViewer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { Write-Host "열람 도구가 화면을 열지 못했거나 접근 파일을 찾지 못했습니다"; exit 1 }
+          Write-Host "잠금 화면 응답 확인(접근 파일 찾음)"
       - name: 비공개 레포 릴리즈에 올리기
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.VIEWER_BUILD_TOKEN }}
         run: |
-          Compress-Archive -Path src\tools\viewer\dist\RigViewer -DestinationPath RigViewer-windows-x64.zip
-          gh release upload "${{ inputs.tag }}" RigViewer-windows-x64.zip --clobber -R seyongida/Auto_Call_Test
-          Write-Host "올렸습니다: ${{ inputs.tag }} / RigViewer-windows-x64.zip"
+          Copy-Item src\tools\viewer\dist\RigViewer.exe RigViewer-windows-x64.exe
+          gh release upload "${{ inputs.tag }}" RigViewer-windows-x64.exe --clobber -R seyongida/Auto_Call_Test
+          Write-Host "올렸습니다: ${{ inputs.tag }} / RigViewer-windows-x64.exe"
