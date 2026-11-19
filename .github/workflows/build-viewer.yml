@@ -12,8 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "비공개 레포 릴리즈 태그 (예: viewer-v2026.11.19.1) — 그 태그의 코드로 만들어 그 릴리즈에 올린다"
+        description: "비공개 레포 릴리즈 태그 (예: viewer-v2026.11.19.1) — 그 태그의 코드로 만들어 그 릴리즈에 올린다. test 면 브랜치 이름도 된다"
         required: true
+      mode:
+        description: "build = 만들어 올리기 · test = 윈도에서 열람 도구 시험만(올리지 않는다, 로그는 시험 이름 · 오류 한 줄만)"
+        required: false
+        default: build
 permissions:
   contents: read
 jobs:
@@ -34,10 +38,20 @@ jobs:
             tools/viewer
             tools/vonr_check
             orchestrator/src
+            orchestrator/pyproject.toml
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: 시험 (윈도)
+        if: ${{ inputs.mode == 'test' }}
+        shell: pwsh
+        run: |
+          python -m pip install -q -r src\tools\viewer\requirements.txt pytest 2>&1 | Out-Null
+          $env:PYTHONPATH = "src\tools\viewer;src\orchestrator\src"
+          python -m pytest -q -p no:cacheprovider --tb=line -rfE src\tools\viewer\tests 2>&1 | Select-String -Pattern "passed|failed|error|FAILED|ERROR|Error:|Exception" | ForEach-Object { $_.Line }
+          exit $LASTEXITCODE
       - name: rclone 공식 배포본
+        if: ${{ inputs.mode != 'test' }}
         shell: pwsh
         run: |
           $z = "rclone.zip"
@@ -46,6 +60,7 @@ jobs:
           $exe = (Get-ChildItem rc -Recurse -Filter rclone.exe | Select-Object -First 1).FullName
           "RCLONE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: 만들기 (실행 파일 하나 · 창 없음)
+        if: ${{ inputs.mode != 'test' }}
         shell: pwsh
         env:
           ENC_B64: ${{ secrets.VIEWER_ENC_B64 }}
@@ -59,6 +74,7 @@ jobs:
           if ($code -ne 0 -or -not (Test-Path src\tools\viewer\dist\RigViewer.exe)) { Get-Content $log -Tail 40; exit 1 }
           Write-Host ("만들었습니다 — 접근 파일 " + ($(if ($env:ENC_B64) { "포함" } else { "없음" })))
       - name: 실행 확인 (잠금 화면)
+        if: ${{ inputs.mode != 'test' }}
         shell: pwsh
         run: |
           $p = Start-Process src\tools\viewer\dist\RigViewer.exe -ArgumentList "run","--no-browser","--port","18765" -PassThru
@@ -69,6 +85,7 @@ jobs:
           if (-not $ok) { Write-Host "열람 도구가 화면을 열지 못했거나 접근 파일을 찾지 못했습니다"; exit 1 }
           Write-Host "잠금 화면 응답 확인(접근 파일 찾음)"
       - name: 비공개 레포 릴리즈에 올리기
+        if: ${{ inputs.mode != 'test' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.VIEWER_BUILD_TOKEN }}
