@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP "build.log"
-          & powershell -ExecutionPolicy Bypass -File src\tools\viewer\packaging\build_win.ps1 -Rclone $env:RCLONE_EXE *> $log
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File src\tools\viewer\packaging\build_win.ps1 -Rclone $env:RCLONE_EXE *> $log
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path src\tools\viewer\dist\RigViewer\RigViewer.exe)) { Get-Content $log -Tail 40; exit 1 }
           Write-Host "만들었습니다"
       - name: 실행 확인 (잠금 화면)
