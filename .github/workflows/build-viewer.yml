@@ -81,6 +81,15 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process src\tools\viewer\dist\RigViewer.exe -ArgumentList "run","--no-browser","--port","18765" -PassThru
+          # 시작 화면을 찍어 비공개 레포 작업용 초안 릴리즈(viewer-ci)에 올린다 — 실제로 그려지는지 사람이 본다(2026-11-20 'tk' 회색 창)
+          Start-Sleep -Milliseconds 1500
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("splash-shot.png"); Write-Host "시작 화면을 찍었습니다 ($($b.Width)x$($b.Height))"
+          } catch { Write-Host "화면을 찍지 못했습니다" }
           $ok = $false
           for ($i = 0; $i -lt 90; $i++) { try { $r = Invoke-WebRequest http://127.0.0.1:18765/login -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200 -and $r.Content -match "측정 결과 열람" -and $r.Content -notmatch "열쇠 위치\(keyref.json\)가 없습니다|접근 파일\(rigdrive.enc\)이 없습니다") { $ok = $true; break } } catch {} ; Start-Sleep 1 }
           # 탭을 닫은 것처럼 닫힘 신호를 보내고, 실행 파일(부트로더 · 파이썬 둘 다)이 스스로 사라지는지 — 2026-11-20 사용자: 탭을 닫아도 남는다
@@ -94,6 +103,7 @@ jobs:
           }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           Get-Process RigViewer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (Test-Path splash-shot.png) { $env:GH_TOKEN = "${{ secrets.VIEWER_BUILD_TOKEN }}"; gh release upload viewer-ci splash-shot.png --clobber -R seyongida/Auto_Call_Test 2>&1 | Out-Null }
           if ($ok -and -not $gone) { exit 1 }
           if (-not $ok) { Write-Host "열람 도구가 화면을 열지 못했거나 Drive 열쇠 위치를 찾지 못했습니다"; exit 1 }
           Write-Host "잠금 화면 응답 확인(Drive 열쇠 위치 찾음)"
