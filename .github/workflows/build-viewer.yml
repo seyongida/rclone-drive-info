@@ -64,15 +64,18 @@ jobs:
         shell: pwsh
         env:
           ENC_B64: ${{ secrets.VIEWER_ENC_B64 }}
+          GATE_JSON: ${{ secrets.VIEWER_GATE_JSON }}
         run: |
           $log = Join-Path $env:RUNNER_TEMP "build.log"
           $enc = Join-Path $env:RUNNER_TEMP "rigdrive.enc"
-          if ($env:ENC_B64) { [IO.File]::WriteAllBytes($enc, [Convert]::FromBase64String($env:ENC_B64)); $env:RIG_VIEWER_ENC = $enc }
+          $gate = Join-Path $env:RUNNER_TEMP "gate.json"
+          if ($env:GATE_JSON) { [IO.File]::WriteAllText($gate, $env:GATE_JSON); $env:RIG_VIEWER_GATE = $gate }      # 문지기(권장) — 열쇠 파일 없이
+          elseif ($env:ENC_B64) { [IO.File]::WriteAllBytes($enc, [Convert]::FromBase64String($env:ENC_B64)); $env:RIG_VIEWER_ENC = $enc }
           & pwsh -NoProfile -ExecutionPolicy Bypass -File src\tools\viewer\packaging\build_win.ps1 -Rclone $env:RCLONE_EXE *> $log
           $code = $LASTEXITCODE
-          Remove-Item $enc -ErrorAction SilentlyContinue
+          Remove-Item $enc, $gate -ErrorAction SilentlyContinue
           if ($code -ne 0 -or -not (Test-Path src\tools\viewer\dist\RigViewer.exe)) { Get-Content $log -Tail 40; exit 1 }
-          Write-Host ("만들었습니다 — 접근 파일 " + ($(if ($env:ENC_B64) { "포함" } else { "없음" })))
+          Write-Host ("만들었습니다 — " + ($(if ($env:GATE_JSON) { "문지기 방식" } elseif ($env:ENC_B64) { "접근 파일 포함" } else { "접근 정보 없음" })))
       - name: 실행 확인 (잠금 화면)
         if: ${{ inputs.mode != 'test' }}
         shell: pwsh
